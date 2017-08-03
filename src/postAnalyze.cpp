@@ -40,3 +40,23 @@ void outputPressureOnWall(int nmesh)
 	}
 	fcout.close();
 }
+
+//用于方腔驱动的算例，输出  x=0.5， 这条线上的速度
+void outPutVelcoity()
+{
+	std::ofstream fcout;
+	fcout.open("velocity.plt");
+	fcout << std::setprecision(15);
+	fcout << "VARIABLES=   \"y\" ,    \"Ux\"   " << std::endl;
+
+	Mesh_TYPE & MP = Mesh[1];
+	for (int mBlock = 1; mBlock <= MP.Num_Block; ++mBlock) {
+		Block_TYPE & B = MP.Block[mBlock];
+		int nx = B.nx;	int ny = B.ny;
+		int myi = (int)(nx / 2);
+		for (int j = 1 + LAP; j <= ny + LAP; ++j) {
+			fcout << std::setw(9) << B.y1[myi][j] << "   " << std::setw(9) << B.U[myi][j][2] / B.U[myi][j][1] << std::endl;
+		}
+	}
+	fcout.close();
+}

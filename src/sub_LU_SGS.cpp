@@ -9,7 +9,12 @@
 
 void comput_DFn(int NV, double*  DF, double U[], double DU[], double n1, double  n2, double gamma);
 
+__global__
+void sweep(int offset, int * transferInt, double *transferDouble, double * dU)
+{
 
+
+}
 
 //采用LU_SGS方法计算DU = U(n + 1) - U(n)
 void  du_LU_SGS_2D(int nMesh, int mBlock, double alfa1)
@@ -29,6 +34,14 @@ void  du_LU_SGS_2D(int nMesh, int mBlock, double alfa1)
 	//w_LU是松弛因子（1到2之间），增大w_LU会提高稳定性，但会降低收敛速度
 	for (int plane = 2; plane <= nx + ny - 2; ++plane) {
 		//$OMP PARALLEL for( int DEFAULT(PRIVATE) SHARED(plane, nx, ny, NV, B, gamma, If_viscous, alfa1)
+		int maxCirculation = plane - 1 < ny - 1 ? plane + 1 : ny - 1;
+		int minCirculation = plane - nx + 1 > 1 ? plane - nx + 1 : 1;
+		int offset = minCirculation;
+		int total_threads = maxCirculation - minCirculation + 1;
+		int thread = 32;
+		int block = (total_threads + thread-1) / total_threads;
+
+		sweep << <block, thread >> > (offset, transferInt_dev, transferDouble_dev, dU);
 		for (int j = 1; j <= ny - 1; ++j) {
 			int i = plane - j;
 			if (i< 1 || i>nx - 1) { continue; }    //超出了这个平面
@@ -36,11 +49,6 @@ void  du_LU_SGS_2D(int nMesh, int mBlock, double alfa1)
 			for (int m = 1; m <= 6; ++m) {
 				alfa[m] = B.vol[i][j] / B.dt[i][j] + w_LU*(B.Lci[i][j] + B.Lcj[i][j]) + B.vol[i][j] * alfa1;        //对角元
 			}
-
-			//if (alfa1!= 0) {
-			//write(*, *) "debug== ?#", alfa1
-			//read(*, *)
-			//}
 
 			if (If_viscous == 1) {
 				for (int m = 1; m <= 6; ++m) {
@@ -57,10 +65,10 @@ void  du_LU_SGS_2D(int nMesh, int mBlock, double alfa1)
 			if (i != 1) {
 				//通量的差量，用来近似计算A*W(See Blazek's book, page 208)
 				comput_DFn(NV, DF, B.U[i - 1 + LAP][j + LAP], B.dU[i - 1][j], B.ni1[i][j], B.ni2[i][j], gamma);
+
 				for (int m = 1; m <= NV; ++m) {
 					dui[m] = 0.5E0*(DF[m] * B.si[i][j] + w_LU*B.Lci[i - 1][j] * B.dU[i - 1][j][m]);
 				}
-
 
 				if (If_viscous == 1) {
 					for (int m = 1; m <= NV; ++m) {
@@ -99,7 +107,7 @@ void  du_LU_SGS_2D(int nMesh, int mBlock, double alfa1)
 			}
 			//PAUSE;
 		}
-		//$OMP END PARALLEL for( int
+		//$OMP END PARALLEL do int
 	}
 	//----------------------------------------------------------
 	//从(nx - 1, ny - 1)到(1, 1)的扫描过程 （向下扫描过程）
@@ -169,9 +177,8 @@ void  du_LU_SGS_2D(int nMesh, int mBlock, double alfa1)
 }
 
 
-
-
 //计算通量的差量 DF = F(U + DU) - F(U), LU - SGS方法中使用，用来近似A*DU
+//comput_DFn(NV, DF, B.U[i - 1 + LAP][j + LAP], B.dU[i - 1][j], B.ni1[i][j], B.ni2[i][j], gamma);
 void comput_DFn(int NV, double*  DF, double U[], double DU[], double n1, double  n2, double gamma)
 {
 	double * U2=(double *) malloc((NV+1)*sizeof(double));

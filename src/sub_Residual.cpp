@@ -10,8 +10,12 @@
 #include "common.h"
 #include "sub_turbulence_BL.h"
 #include "sub_turbulence_SST.h"
-#include "Flow_Var.h"
+//#include "Flow_Var.h"
+
 #include <cmath>
+
+#include"kernelResidual.h"
+
 
 void comput_duvtpckw(int nMesh, int mBlock, flow_var & fl);
 void Residual_FVM(int nMesh, int mBlock, flow_var & fl);
@@ -28,7 +32,7 @@ void Reconstuction_original(double U0[5][5], double * UL, double * UR, double ga
 void scheme_fP(double & uL, double u1, double u2, double u3, double u4, int Iflag_Scheme);
 void scheme_fm(double & UR, double u1, double u2, double u3, double u4, int Iflag_Scheme);
 
-void get_viscous(int nMesh, int mBlock, flow_var &fl);
+
 
 
 template<typename T>
@@ -80,9 +84,11 @@ void Comput_Residual_one_mesh(int nMesh)
 	else {
 		Sfac = 1.e0 / (2.E0*dt_global);
 	}
+
 	for (int mBlock = 1; mBlock <= MP.Num_Block; ++mBlock) {
 		Block_TYPE & B = MP.Block[mBlock];                 //第nMesh 重网格的第mBlock块
 		int nx = B.nx; int  ny = B.ny;
+
 		//分配临时变量
 		//allocate(d(0:nx, 0 : ny), uu(0:nx, 0 : ny), v(0:nx, 0 : ny), T(0:nx, 0 : ny), cc(0:nx, 0 : ny), p(0:nx, 0 : ny))   //Bug found, 2012 - 5 - 1
 		flow_var  fl;
@@ -95,12 +101,14 @@ void Comput_Residual_one_mesh(int nMesh)
 
 		allocMatrix(fl.Fluxi, nx, ny, 4);	allocMatrix(fl.Fluxj, nx, ny, 4);
 
-		//------------------------------------------------------------------------------------
+		//--------------------------------------------------------------------------------------
 		comput_duvtpckw(nMesh, mBlock, fl);    //计算基本量 d, u, v, T, p, cc, Kt, Wt
-		//-------------------------------------------------------------------------------------- -
+		//--------------------------------------------------------------------------------------
 		//求解N - S方程的最核心模块
 		//计算一个网格块的残差（右端项）; 第nMesh 重网格的第mBlock块  （湍流模型也在该块中计算）
-		Residual(nMesh, mBlock, fl);
+
+		//Residual(nMesh, mBlock, fl);
+		beforeKernelResidual(mBlock, fl); 
 
 		//双时间步 LU - SGS方法，添加项
 		if (Time_Method == Time_Dual_LU_SGS) {
@@ -176,6 +184,10 @@ void comput_duvtpckw(int nMesh, int mBlock, flow_var & fl)
 				printf("\n T <1.d-5 at // i= %d, j=%d, mBlock= %d, T= %f \n", i, j, mBlock, fl.T[i][j]);
 				PAUSE;
 				exit(1);
+			}
+			if (B.U[i][j][1] != B.U[i][j][1] || B.U[i][j][2] != B.U[i][j][2] || B.U[i][j][3] != B.U[i][j][3] || B.U[i][j][4] != B.U[i][j][4]) {
+				printf("ERROR! in comput_duvtpckw! mBlock= %d, i= %d, j=%d", mBlock, i, j);
+				PAUSE;
 			}
 		}
 	}
@@ -554,7 +566,6 @@ void Residual_FVM(int nMesh, int mBlock, flow_var & fl)
 	//$OMP END PARALLEL
 }
 
-
 //--------------------------------------------------------------------------
 //利用原始变量重构
 void Reconstuction_original(double U0[5][5], double * UL, double * UR, double gamma, int Iflag_Scheme)
@@ -727,7 +738,6 @@ void scheme_fm(double & UR, double u1, double u2, double u3, double u4, int Ifla
 	}
 }
 //------------------------------------------------------------------------------
-
 
 //----------------------------------------------------------------
 //分子粘性系数的计算

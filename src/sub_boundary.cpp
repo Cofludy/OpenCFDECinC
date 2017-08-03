@@ -9,6 +9,7 @@
 void Symmetry_or_slidewall(int nMesh, int mBlock, int ksub);
 void boundary_Farfield_inlet_outlet(int nMesh, int mBlock, int ksub, int Bc_neighb);
 void boundary_wall(int nMesh, int mBlock, int ksub);
+void boundary_move_wall(int nMesh, int mBlock, int ksub);
 void U_average_conner(int Nvar1, double U1[], double U2[], double U3[], double*  U4, double Cv);
 
 //---------------------------------------------------------------------------- -
@@ -205,6 +206,9 @@ void Boundary_condition_onemesh(int nMesh)
 				}
 				else if (Bc.neighb == BC_Symmetry_or_slidewall) {	//对称（或滑移）边界
 					Symmetry_or_slidewall(nMesh, mBlock, ksub);
+				}
+				else if (Bc.neighb == BC_Move_Wall) {
+					boundary_move_wall(nMesh, mBlock, ksub);
 				}
 			}
 
@@ -425,6 +429,89 @@ void boundary_wall(int nMesh, int mBlock, int ksub)
 }
 
 
+//!------------------------------------------------------------------ -
+//!处理壁面边界条件,壁面有速度运动
+//!使用LAP层虚网格
+void boundary_move_wall(int nMesh, int mBlock, int ksub)
+{
+	const double beta1_SST = 0.075e0;
+	const double U_wall = 1.0;
+	Mesh_TYPE & MP = Mesh[nMesh];
+	Block_TYPE & B = MP.Block[mBlock];
+	BC_MSG_TYPE & Bc = B.bc_msg[ksub];
+
+	double Tsb = 110.4e0 / T_inf;    //参考温度 （Surthland公式中使用)
+
+									 //这里由于 U 和 x ，y 矩阵存在虚拟网格的偏移，这里计算的起点和终点也做了相应的修改。
+	int ibegin = Bc.ist + LAP;  int iend = Bc.iend + LAP;
+	int jbegin = Bc.jst + LAP; int jend = Bc.jend + LAP;
+
+	for (int k = 1; k <= LAP; ++k) {
+		for (int i = ibegin; i <= iend; ++i) {
+			for (int j = jbegin; j <= jend; ++j) {
+				//(i1, j1)  内点；(i2, j2) 为对应的buffer区的点
+				int i1 = 0; int j1 = 0;
+				int i2 = 0; int j2 = 0;
+				if (Bc.face == 1) {
+					i1 = i + k - 1; j1 = j; i2 = i - k; j2 = j;
+				}
+				else if (Bc.face == 2) {
+					i1 = i; j1 = j + k - 1; i2 = i; j2 = j - k;
+				}
+				else if (Bc.face == 3) {
+					i1 = i - k; j1 = j;  i2 = i + k - 1; j2 = j;
+				}
+				else {
+					i1 = i; j1 = j - k; i2 = i; j2 = j + k - 1;
+				}
+				//i1 += LAP; j1 += LAP;
+				//i2 += LAP; j2 += LAP;
+				double d1 = 0;
+				if (Twall <= 0) {  //绝热壁
+					B.U[i2][j2][1] = B.U[i1][j1][1];       //d(0) = d(1)   对称
+					B.U[i2][j2][2] = 2 * U_wall*B.U[i1][j1][1] - B.U[i1][j1][2];      //u(0) = -u(1)->d*u 反对称
+					B.U[i2][j2][3] = -B.U[i1][j1][3];      //v(0) = -v(1)->d*v 反对称
+					double u2 = B.U[i2][j2][2] / B.U[i2][j2][1];	double u1 = B.U[i1][j1][2] / B.U[i1][j1][1];
+					B.U[i2][j2][4] = B.U[i1][j1][4] + 0.5*B.U[i2][j2][1] * (u2*u2 - u1*u1);       //E(0) = E(1)   对称
+				}
+				else {   //等温壁
+					d1 = B.U[i1][j1][1];   //内点处的密度、压力、温度、速度
+					double u1 = B.U[i1][j1][2] / d1;
+					double v1 = B.U[i1][j1][3] / d1;
+					double p1 = (B.U[i1][j1][4] - 0.50*d1*(u1*u1 + v1*v1))*(gamma - 1.0);
+					double T1 = gamma*Ma*Ma*p1 / d1;
+
+					double p2 = p1;               //边界层假设，壁面处法向压力梯度为0
+					double T2 = 2.e0*Twall - T1;    //等温壁  0.5*(T1 + T2) = Twall
+					double u2 = 2 * U_wall - u1;              //无滑移有速度壁面
+					double v2 = -v1;
+					double d2 = gamma*Ma*Ma*p2 / T2;
+
+					B.U[i2][j2][1] = d2;
+					B.U[i2][j2][2] = d2*u2;
+					B.U[i2][j2][3] = d2*v2;
+					B.U[i2][j2][4] = p2 / (gamma - 1.0) + 0.50*d2*(u2*u2 + v2*v2);
+				}
+
+				if (MP.Nvar == 5) {
+					B.U[i2][j2][5] = 0.e0;
+				}
+				if (MP.Nvar == 6) {
+					double d2 = B.U[i2][j2][1];
+					double T2 = (B.U[i2][j2][4] - 0.5e0*(B.U[i2][j2][2] * B.U[i2][j2][2] + B.U[i2][j2][3] * B.U[i2][j2][3]) / d2) / (Cv*d2);
+					double Amu2 = (1.e0 + Tsb)*sqrt(T2*T2*T2) / (Tsb + T2);   //层流粘性系数，sutherland equation
+
+																			  //B.U(5, i2, j2) = 0.d0                               //湍动能 （固壁上为0）
+																			  //B.U(6, i2, j2) = 10.d0*6.d0*Amu2 / (d2*beta1_SST*B.dw(i1, j1)**2 * Re*Re)   //湍能比耗散率, Bug removed 2012 - 5 - 10
+
+					double wt = 60.e0*Amu2 / (d2*beta1_SST*B.dw[i1 - LAP][j1 - LAP] * B.dw[i1 - LAP][j1 - LAP] * Re*Re);
+					B.U[i2][j2][5] = -B.U[i1][j1][5];           //壁面镜像点， 使得壁面上k = 0
+					B.U[i2][j2][6] = (d1 + d2)*wt - B.U[i1][j1][6];
+				}
+			}
+		}
+	}
+}
 
 //!------------------------------------------------------------------------ -
 //!可处理远场边界条件 以及入口 / 出口边界条件

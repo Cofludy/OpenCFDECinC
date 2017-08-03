@@ -164,6 +164,7 @@ void SST_kw(int nMesh, int mBlock, flow_var & fl)
 			f1[i][j] = 0.0;
 		}
 	}
+
 	//计算湍流粘性系数Amu_t;
 	//计算函数f1 （区分近壁区与远壁区）
 	//计算源项，导数采用2阶中心差分（利用Jocabian变换）

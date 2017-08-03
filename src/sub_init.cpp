@@ -20,6 +20,12 @@ using namespace std;
 void init_flow_zero();
 void init_flow_read();
 
+extern int * transferInt_dev = nullptr;
+extern double * transferDouble_dev = nullptr;
+extern double * x1_dev = nullptr;
+extern double * y1_dev = nullptr;
+extern double * x_dev = nullptr;
+extern double * y_dev = nullptr;
 
 
 //检查网格是否适用于多重网格
@@ -347,6 +353,73 @@ void Init_flow()
 			}
 		}
 	}
+
+	if (USEGPU) {
+		Block_TYPE B = Mesh[1].Block[1];
+		int nx = B.nx; int ny = B.ny;
+		int mm1 = nx + 2 * LAP - 1;
+		int nn1 = ny + 2 * LAP - 1;
+		double 	p00 = 1.e0 / (gamma*Ma*Ma);
+
+		//将一些零散的常数打包传递到GPU上
+		int transferInt[5] = { nx, ny, LAP, Nvar };
+		//					   0   1   2     3
+		double transferDouble[15] = { p00, gamma, Cv , Ma, T_inf, Re, Cp, Pr, PrT };
+		//                             0     1     2    3    4     5   6   7   8
+		//int * transferInt_dev;		double * transferDouble_dev;
+		HANDLE_ERROR(cudaMalloc((int **)& transferInt_dev, 15 * sizeof(int)));
+		HANDLE_ERROR(cudaMalloc((double **)& transferDouble_dev, 15 * sizeof(double)));
+		HANDLE_ERROR(cudaMemcpy(transferInt_dev, transferInt, 15 * sizeof(int), cudaMemcpyHostToDevice));
+		HANDLE_ERROR(cudaMemcpy(transferDouble_dev, transferDouble, 15 * sizeof(double), cudaMemcpyHostToDevice));
+		HANDLE_ERROR(cudaDeviceSynchronize());
+
+		//将几何信息存放到GPU全局内存上
+
+		//网格中心坐标 传递到GPU上,这里使用页锁定内存来传递参数
+		/*	double * x1_dev;	double * y1_dev;*/
+		double *x1_host;	double *y1_host;	//主机上的页锁定内存
+		HANDLE_ERROR(cudaHostAlloc((double **)& x1_host, (mm1 + 1)*(nn1 + 1) * sizeof(double), cudaHostAllocDefault));
+		HANDLE_ERROR(cudaHostAlloc((double **)& y1_host, (mm1 + 1)*(nn1 + 1) * sizeof(double), cudaHostAllocDefault));
+
+		HANDLE_ERROR(cudaMalloc((double **)& x1_dev, (mm1 + 1)*(nn1 + 1) * sizeof(double)));
+		HANDLE_ERROR(cudaMalloc((double **)& y1_dev, (mm1 + 1)*(nn1 + 1) * sizeof(double)));
+
+		for (int i = 0; i <= mm1; ++i) {
+			for (int j = 0; j <= nn1; ++j) {
+				//printf("%d, %d\n", i, j);
+				x1_host[i*(nn1 + 1) + j] = B.x1[i][j];
+				y1_host[i*(nn1 + 1) + j] = B.y1[i][j];
+			}
+		}
+		HANDLE_ERROR(cudaMemcpy(x1_dev, x1_host, (mm1 + 1)*(nn1 + 1) * sizeof(double), cudaMemcpyHostToDevice));
+		HANDLE_ERROR(cudaMemcpy(y1_dev, y1_host, (mm1 + 1)*(nn1 + 1) * sizeof(double), cudaMemcpyHostToDevice));
+		HANDLE_ERROR(cudaFreeHost(x1_host));	x1_host = nullptr;
+		HANDLE_ERROR(cudaFreeHost(y1_host));	y1_host = nullptr;
+
+		//网格坐标 传递到GPU上， 这里使用页锁定内存计算
+		//double * x_dev;	double * y_dev;
+		double *x_host;	double *y_host;	//主机上的页锁定内存
+		int mm = nx + 2 * LAP;	int nn = ny + 2 * LAP;
+		HANDLE_ERROR(cudaHostAlloc((double **)& x_host, (mm + 1)*(nn + 1) * sizeof(double), cudaHostAllocDefault));
+		HANDLE_ERROR(cudaHostAlloc((double **)& y_host, (mm + 1)*(nn + 1) * sizeof(double), cudaHostAllocDefault));
+
+		HANDLE_ERROR(cudaMalloc((double **)& x_dev, (mm + 1)*(nn + 1) * sizeof(double)));
+		HANDLE_ERROR(cudaMalloc((double **)& y_dev, (mm + 1)*(nn + 1) * sizeof(double)));
+
+		for (int i = 0; i <= mm; ++i) {
+			for (int j = 0; j <= nn; ++j) {
+				//printf("%d, %d\n", i, j);
+				x_host[i*(nn + 1) + j] = B.x[i][j];
+				y_host[i*(nn + 1) + j] = B.y[i][j];
+			}
+		}
+		HANDLE_ERROR(cudaMemcpy(x_dev, x_host, (mm + 1)*(nn + 1) * sizeof(double), cudaMemcpyHostToDevice));
+		HANDLE_ERROR(cudaMemcpy(y_dev, y_host, (mm + 1)*(nn + 1) * sizeof(double), cudaMemcpyHostToDevice));
+		HANDLE_ERROR(cudaFreeHost(x_host));	x_host = nullptr;
+		HANDLE_ERROR(cudaFreeHost(y_host));	y_host = nullptr;
+
+	}
+
 	printf("Initiallize OK ... ... \n");
 }
 

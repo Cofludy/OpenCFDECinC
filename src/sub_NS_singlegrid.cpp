@@ -7,6 +7,8 @@
 #include "sub_NS_multigrid.h"
 #include <stdio.h>
 #include <cmath>
+#include <ctime>
+#include <fstream>
 
 void force_vt_kw(int nMesh);
 
@@ -67,13 +69,32 @@ void force_vt_kw(int nMesh)
 //采用LU_SGS法进行时间推进一个时间步 （第nMesh重网格 的单重网格）
 void NS_time_advance_LU_SGS(int nMesh)
 {
+	std::ofstream fcout1, fcout2;
+	fcout1.open("time_consuming1.dat", std::ios::app);
+	fcout2.open("time_consuming2.dat", std::ios::app);
+	clock_t start,mid, finish;
+	start = clock();
+
 	Comput_Residual_one_mesh(nMesh);     //单重网格上计算残差
 
-	double alfa1 = 0.e0;
+	mid = clock();
+
+	double alfa1 = 0.e0; 
 	Mesh_TYPE &	MP = Mesh[nMesh];
 	for (int mBlock = 1; mBlock <= MP.Num_Block; ++mBlock) {
 
 		du_LU_SGS_2D(nMesh, mBlock, alfa1);         //采用LU_SGS方法计算DU = U(n + 1) - U(n)
+
+		finish = clock();
+
+		//double duration = (double)(finish - start) / CLOCKS_PER_SEC;
+		double dur1 = (double)(mid - start);
+		double dur2 = (double)(finish - mid);
+		//printf("time1= %f, time2=%f \n", dur1, dur2);
+		fcout1 << dur1 << std::endl;
+		fcout2<<"  " << dur2 << std::endl;
+		fcout1.close();	//统计求解通量的时间和计算LU_SUS的时间
+		fcout2.close();	//统计求解通量的时间和计算LU_SUS的时间
 
 		Block_TYPE & B = MP.Block[mBlock];
 		int nx = B.nx; int ny = B.ny;
@@ -83,12 +104,13 @@ void NS_time_advance_LU_SGS(int nMesh)
 			for (int j = 1; j <= ny - 1; ++j) {
 				for (int m = 1; m <= Nvar; ++m) {
 					B.U[i+LAP][j + LAP][m] +=  B.dU[i][j][m];        //U(n + 1) = U(n) + dU
+					//printf("\n B.U[%d][%d][%d] = %10.9e,  B.Res = %10.9e, dU=%10.9e \n", i, j, m, B.U[i + LAP][j + LAP][m], B.Res[i][j][m], B.dU[i][j][m]);
 				}
 			}
 		}
 	}
 		
-	//-------------------------------------------------------------------------------------- -
+	//--------------------------------------------------------------------------------------
 	Boundary_condition_onemesh(nMesh);        //边界条件 （设定Ghost Cell的值）
 	update_buffer_onemesh(nMesh);         // 同步各块的交界区
 
